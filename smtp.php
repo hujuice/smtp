@@ -33,11 +33,6 @@
 class smtp
 {
     /**
-     * Mailer
-     */
-    const MAILER = 'PHP smtp class "Sergio Vaccaro" <hujuice@inservibile.org>. https://github.com/hujuice/smtp';
-
-    /**
      * New line character
      *
      * SMTP wants <CR><LF>.<CR><LF>
@@ -72,13 +67,23 @@ class smtp
      * Data ok
      * @link @link http://www.fehcom.de/qmail/smtpauth.html
      */
-    const DATAOK;
+    const DATAOK = '354';
 
     /**
      * Bye
      * @link @link http://www.fehcom.de/qmail/smtpauth.html
      */
-    const BYE;
+    const BYE = '221';
+
+    /**
+     * Mailer
+     */
+    const MAILER = 'PHP smtp class';
+
+    /**
+     * Mailer author
+     */
+    const MAILER_AUTHOR = '"Sergio Vaccaro" <hujuice@inservibile.org> https://github.com/hujuice/smtp';
 
     /**
      * SMTP socket resource
@@ -140,7 +145,7 @@ class smtp
      *
      * @var array
      */
-    protected $_bcc;
+    protected $_bcc = array();
 
     /**
      * Content-Type
@@ -171,6 +176,13 @@ class smtp
     protected $_body;
 
     /**
+     * Log
+     *
+     * @var string
+     */
+    protected $_log = '';
+
+    /**
      * Add or replace recipients
      *
      * @param string $dest
@@ -179,7 +191,7 @@ class smtp
      * @return void
      * @throw Exception
      */
-    protected _recipients($dest, $destName, $class)
+    protected function _recipients($dest, $destName, $class)
     {
         if (in_array($class, array('_to', '_cc', '_bcc')))
         {
@@ -190,7 +202,7 @@ class smtp
                 else
                 {
                     if (isset($this->{$class}[$destName]))
-                        unset($this->{$class}[$destName);
+                        unset($this->{$class}[$destName]);
                 }
             }
             else
@@ -211,11 +223,17 @@ class smtp
      * @return string
      * @throw Exception
      */
-    protected _dialog($request, $expect)
+    protected function _dialog($request, $expect)
     {
+        $this->_log .= $request . PHP_EOL;
+
         fwrite ($this->_smtp, $request . self::NL);
-        if (substr($response = fgets($this->_smtp), 0, 3) != $expect)
-            throw new Exception('Message "' . $request . '" NOT accepted! The server responded with:' . PHP_EOL . $response);
+        $response = fgets($this->_smtp);
+
+        $this->_log .= $response . PHP_EOL;
+
+        if (substr($response, 0, 3) != $expect)
+            throw new Exception('Message "' . $request . '" NOT accepted! Here is the dialog dump:' . PHP_EOL . $this->_log);
 
         return $response;
     }
@@ -240,6 +258,8 @@ class smtp
         {
             if (substr($response = fgets($this->_smtp), 0, 3) != self::READY)
                 throw new Exception('Server NOT ready! The server responded with this message:' . PHP_EOL . $response);
+
+            $this->_log = $response . PHP_EOL;
         }
         else
         {
@@ -342,7 +362,7 @@ class smtp
      */
     public function contentType($content_type = null)
     {
-        if (null !=== $content_type)
+        if (null !== $content_type)
             $this->_contentType = (string) $content_type;
         return $this->_contentType;
     }
@@ -384,10 +404,12 @@ class smtp
     {
         if (null !== $body)
         {
+            $body = str_replace("\n", self::NL, (string) $body);
+
             if ($append)
-                $this->_body .= (string) $body;
+                $this->_body .= $body;
             else
-                $this->_body = (string) $body;
+                $this->_body = $body;
         }
         return $this->_body;
     }
@@ -401,7 +423,7 @@ class smtp
     public function send()
     {
         // Check for minimum requirements
-        if (empty($from))
+        if (empty($this->_from))
             throw new Exception('Sender undefined');
 
         if (empty($this->_to) && empty($this->_cc) && empty($this->_bcc))
@@ -479,10 +501,34 @@ class smtp
         // Date
         $message .= 'Date: ' . date('r') . self::NL;
 
-        $this->_dialog($message, self::OK);
+        // Subject
+        $message .= 'Subject: ' . $this->_subject . self::NL;
+
+        // Mailer
+        $message .= 'X-mailer: ' . self::MAILER . self::NL;
+        $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
+
+        // Content-Type
+        $message .= 'Content-Type: ' . $this->_contentType . '; charset=' . $this->_charset . self::NL;
+
+        // Message
+        $message .= self::NL . $this->_body . self::NL . '.';
+
+        // Body!
+        $send = $this->_dialog($message, self::OK);
 
         // Quit
-        $bye = $this->_dialog('QUIT', self::BYE);
-        return substr($bye, 4);
+        $this->_dialog('QUIT', self::BYE);
+        return substr($send, 4);
+    }
+
+    /**
+     * Dump the log
+     *
+     * @return string
+     */
+    public function dump()
+    {
+        return $this->_log;
     }
 }
