@@ -1,0 +1,4 @@
+smtp
+====
+
+Qualified SMTP client
