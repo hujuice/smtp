@@ -1,4 +1,4 @@
-smtp
+SMTP
 ====
 Rich SMTP client
 
