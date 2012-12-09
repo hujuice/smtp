@@ -14,6 +14,10 @@ Basic usage
 Advanced usage
 --------------
     $smtp = new Smtp('smtp_server', 25, 3);
+    $smtp->from('user@domain', 'My name');
+    $smtp->mailFrom('my_account@domain');
+    $smtp->replyTo('anotheraddress@anotherdomain');
+    $smtp->priority(4);
     $smtp->to('addr1@domain', 'My friend');
     $smtp->to('addr2@anotherdomain', 'Another friend');
     $smtp->cc('addr3@domain', 'My mama');
@@ -32,13 +36,16 @@ Advanced usage
     ob_end_clean();
     $smtp->raw($stringdata, 'Flyer.jpg', 'image/jpeg');
     $smtp->send();
-    $smtp->dump(); // Dump the full logging
+    echo $smtp->dump(); // Dump the full logging
 
 FEATURES
 --------
 - multiple recipients
 - To, Cc, Bcc recipients
 - named recipients
+- separate 'MAIL FROM' management
+- Reply-To management
+- priority management
 - Content-Type equipped text (e.g. text/html)
 - attachments from file
 - attachments from string

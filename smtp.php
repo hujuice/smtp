@@ -109,16 +109,23 @@ class smtp
     /**
      * From
      *
-     * @var string
+     * @var array
      */
     protected $_from;
 
     /**
-     * From (name)
+     * MAIL FROM
      *
      * @var string
      */
-    protected $_fromName;
+    protected $_mailFrom = null;
+
+    /**
+     * Reply-to
+     *
+     * @var array
+     */
+    protected $_replyTo = array();
 
     /**
      * To
@@ -146,6 +153,16 @@ class smtp
      * @var array
      */
     protected $_bcc = array();
+
+    /**
+     * Priority
+     *
+     * Priorities are from 1 (low) to 5 (high)
+     * 3 is normal
+     *
+     * @var integer
+     */
+    protected $_priority;
 
     /**
      * Subject
@@ -312,10 +329,42 @@ class smtp
     {
         if ($from)
         {
-            $this->_from = (string) $from;
-            $this->_fromName = (string) $name;
+            $this->_from['address'] = (string) $from;
+            $this->_from['name'] = (string) $name;
         }
-        return array('from' => $this->_from, 'name' => $this->_fromName);
+        return $this->_from;
+    }
+
+    /**
+     * MAIL FROM
+     *
+     * @param string $mail_from
+     * @return string
+     */
+    public function mailFrom($mail_from = null)
+    {
+        if ($mail_from)
+            $this->_mailFrom = (string) $mail_from;
+
+        return $this->_mailFrom;
+    }
+
+    /**
+     * Reply-to
+     *
+     * @param string $reply_to
+     * @param string $name
+     * @return array
+     */
+    public function replyTo($reply_to = null, $name = null)
+    {
+
+        if ($reply_to)
+        {
+            $this->_replyTo['address'] = (string) $reply_to;
+            $this->_replyTo['name'] = (string) $name;
+        }
+        return $this->_replyTo;
     }
 
     /**
@@ -355,6 +404,25 @@ class smtp
     {
         $this->_recipients($bcc, $bccName, '_bcc');
         return $this->_bcc;
+    }
+
+    /**
+     * Priority
+     *
+     * @param integer $priority
+     * @return integer
+     */
+    public function priority($priority = null)
+    {
+        if ($priority)
+        {
+            $priority = (integer) $priority;
+            if (($priority > 0) && ($priority < 6))
+                $this->_priority = $priority;
+            else
+                throw new Exception('Priority are integer from 1 (low) to 5 (high)');
+        }
+        return $this->_priority;
     }
 
     /**
@@ -472,7 +540,7 @@ class smtp
             throw new Exception('No message text');
 
         // HELO
-        $sender = explode('@', $this->_from);
+        $sender = explode('@', $this->_from['address']);
         $this->_dialog('HELO ' . $sender[1], self::OK);
 
         // Auth
@@ -485,7 +553,11 @@ class smtp
         }
 
         // From
-        $this->_dialog('MAIL FROM:<' . $this->_from . '>', self::OK);
+        if ($this->_mailFrom)
+            $from = $this->_mailFrom;
+        else
+            $from = $this->_from['address'];
+        $this->_dialog('MAIL FROM:<' . $from . '>', self::OK);
 
         // Recipients
         foreach($this->_to as $rcpt)
@@ -502,10 +574,19 @@ class smtp
         $message = '';
 
         // From
-        if (empty($this->_fromName))
-            $message .= 'From: <' . $this->_from . '>' . self::NL;
+        if (empty($this->_from['name']))
+            $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
         else
-            $message .= 'From: "' . $this->_fromName . '"<' . $this->_from . '>' . self::NL;
+            $message .= 'From: "' . $this->_from['name'] . '"<' . $this->_from['address'] . '>' . self::NL;
+
+        // Reply to
+        if (!empty($this->_replyTo))
+        {
+            if (empty($this->_replyTo['name']))
+                $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
+            else
+                $message .= 'Reply-To: "' . $this->_replyTo['name'] . '"<' . $this->_replyTo['address'] . '>' . self::NL;
+        }
 
         // To
         foreach ($this->_to as $name => $rcpt)
@@ -533,6 +614,10 @@ class smtp
             else
                 $message .= 'Bcc: "' . $name . '"<' . $rcpt . '>' . self::NL;
         }
+
+        // Priority
+        if ($this->_priority)
+            $message .= 'X-Priority: ' . $this->_priority . self::NL;
 
         // Date
         $message .= 'Date: ' . date('r') . self::NL;
