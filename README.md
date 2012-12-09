@@ -3,16 +3,16 @@ smtp
 Rich SMTP client
 
 Basic usage
-===========
-$smtp = new Smtp('smtp_server');
+-----------
+`$smtp = new Smtp('smtp_server');
 $smtp->from('user@domain');
 $smtp->to('dest@anotherdomain');
 $smtp->subject('subject');
 $smtp->text('message');
-$smtp->send();
+$smtp->send();`
 
 FEATURES
-========
+--------
 - multiple recipients
 - To, Cc, Bcc recipients
 - named recipients
