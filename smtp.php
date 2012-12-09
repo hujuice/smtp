@@ -673,7 +673,7 @@ class smtp
             foreach ($this->_attachments as $name => $attach)
             {
                 $message .= '--' . $separator . self::NL;
-                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
+                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r', filemtime($attach['path'])) . '"' . self::NL;
                 if (substr($attach['Content-Type'], 0, 5) == 'text/')
                 {
                     $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
