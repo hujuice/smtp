@@ -35,7 +35,7 @@ class smtp
     /**
      * New line character
      *
-     * SMTP wants <CR><LF>.<CR><LF>
+     * SMTP wants <CR><LF>
      */
     const NL = "\r\n";
 
@@ -148,20 +148,6 @@ class smtp
     protected $_bcc = array();
 
     /**
-     * Content-Type
-     *
-     * @var string
-     */
-    protected $_contentType = 'text/plain';
-
-    /**
-     * Charset
-     *
-     * @var string
-     */
-    protected $_charset = 'utf-8';
-
-    /**
      * Subject
      *
      * @var string
@@ -169,11 +155,29 @@ class smtp
     protected $_subject;
 
     /**
-     * Message
+     * Text message
      *
      * @var string
      */
-    protected $_body;
+    protected $_text = array(
+                            'body'          => '',
+                            'Content-Type'  => 'text/plain',
+                            'charset'       => 'utf-8'
+                            );
+
+    /**
+     * File attachments
+     *
+     * @var array
+     */
+    protected $_attachments = array();
+
+    /**
+     * Raw attachments
+     *
+     * @var array
+     */
+    protected $_raw = array();
 
     /**
      * Log
@@ -354,33 +358,6 @@ class smtp
     }
 
     /**
-     * Content Type
-     *
-     * @link http://en.wikipedia.org/wiki/MIME#Multipart_messages
-     * @param string $content_type
-     * @return string;
-     */
-    public function contentType($content_type = null)
-    {
-        if (null !== $content_type)
-            $this->_contentType = (string) $content_type;
-        return $this->_contentType;
-    }
-
-    /**
-     * Charset
-     *
-     * @param string $charset
-     * @return string
-     */
-    public function charset($charset = null)
-    {
-        if (null !== $charset)
-            $this->_charset = (string) $charset;
-        return $this->_charset;
-    }
-
-    /**
      * Subject
      *
      * @param string $subject
@@ -394,24 +371,83 @@ class smtp
     }
 
     /**
-     * Body
+     * Text
      *
-     * @param string $body
-     * @param boolean $append
+     * @param string $text
      * @return string
      */
-    public function body($body = null, $append = false)
+    public function text($text = null, $content_type = 'text/plain', $charset = 'utf-8')
     {
-        if (null !== $body)
+        if (null !== $text)
         {
-            $body = str_replace("\n", self::NL, (string) $body);
-
-            if ($append)
-                $this->_body .= $body;
-            else
-                $this->_body = $body;
+            $this->_text = array(
+                                'body'          => str_replace("\n", self::NL, (string) $text),
+                                'Content-Type'  => $content_type,
+                                'charset'       => $charset
+                                );
         }
-        return $this->_body;
+        return $this->_text;
+    }
+
+    /**
+     * Attachment from file
+     *
+     * @link http://en.wikipedia.org/wiki/MIME#Content-Transfer-Encoding
+     * @link http://en.wikipedia.org/wiki/MIME#Multipart_messages
+     * @link http://support.mozilla.org/it/questions/746116
+     * @param string $path
+     * @param string $content_type
+     * @param string $charset Will be used for text/* only
+     * @return array
+     */
+    public function attachment($path = null, $name = '', $content_type = 'application/octet-stream', $charset = 'utf-8')
+    {
+        if (is_readable($path))
+        {
+            $attachment = array(
+                                'path'          => (string) $path,
+                                'Content-Type'  => (string) $content_type,
+                                'charset'       => (string) $charset
+                                );
+
+            $name || ($name = pathinfo($path, PATHINFO_BASENAME));
+
+            $this->_attachments[$name] = $attachment;
+        }
+        elseif(!empty($path))
+            throw new Exception('File ' . $path . ' not found or not readable');
+
+        return $this->_attachments;
+    }
+
+    /**
+     * Raw attachment
+     *
+     * @link http://en.wikipedia.org/wiki/MIME#Content-Transfer-Encoding
+     * @link http://en.wikipedia.org/wiki/MIME#Multipart_messages
+     * @link http://support.mozilla.org/it/questions/746116
+     * @param string $name
+     * @param string $content
+     * @param string $content_type
+     * @param string $charset Will be used for text/* only
+     * @return array
+     */
+    public function raw($content = null, $name = '', $content_type = 'text/plain', $charset = 'utf-8')
+    {
+        if ($content)
+        {
+            $attachment = array(
+                                    'content'       => (string) $content,
+                                    'Content-Type'  => (string) $content_type,
+                                    'charset'       => (string) $charset
+                                    );
+
+            if (empty($name))
+                $name = time() . '-' . mt_rand();
+            $this->_raw[$name] = $attachment;
+        }
+
+        return $this->_raw;
     }
 
     /**
@@ -432,8 +468,8 @@ class smtp
         if (empty($this->_subject)) // Net Ecology
             throw new Exception('No subject');
 
-        if (empty($this->_body))
-            throw new Exception('No message body');
+        if (empty($this->_text))
+            throw new Exception('No message text');
 
         // HELO
         $sender = explode('@', $this->_from);
@@ -508,11 +544,67 @@ class smtp
         $message .= 'X-mailer: ' . self::MAILER . self::NL;
         $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
 
-        // Content-Type
-        $message .= 'Content-Type: ' . $this->_contentType . '; charset=' . $this->_charset . self::NL;
-
         // Message
-        $message .= self::NL . $this->_body . self::NL . '.';
+        /*
+        The message will containt text and attachments.
+        This implementation consider the multipart/mixed method only.
+        http://en.wikipedia.org/wiki/MIME#Multipart_messages
+        */
+        if ($this->_attachments || $this->_raw)
+        {
+            $separator = hash('sha256', time());
+            $message .= 'MIME-Version: 1.0' . self::NL;
+            $message .= 'Content-Type: multipart/mixed; boundary=' . $separator . self::NL;
+            $message .= self::NL;
+            $message .= 'This is a message with multiple parts in MIME format.' . self::NL;
+            $message .= '--' . $separator . self::NL;
+            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+            $message .= self::NL;
+            $message .= $this->_text['body'] . self::NL;
+            foreach ($this->_attachments as $name => $attach)
+            {
+                $message .= '--' . $separator . self::NL;
+                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
+                if (substr($attach['Content-Type'], 0, 5) == 'text/')
+                {
+                    $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
+                    $message .= self::NL;
+                    $message .= file_get_contents($attach['path']) . self::NL;
+                }
+                else
+                {
+                    $message .= 'Content-Type: ' . $attach['Content-Type'] . self::NL;
+                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                    $message .= self::NL;
+                    $message .= base64_encode(file_get_contents($attach['path'])) . self::NL;
+                }
+            }
+            foreach ($this->_raw as $name => $raw)
+            {
+                $message .= '--' . $separator . self::NL;
+                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
+                if (substr($attach['Content-Type'], 0, 5) == 'text/')
+                {
+                    $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
+                    $message .= self::NL;
+                    $message .= $raw['content'] . self::NL;
+                }
+                else
+                {
+                    $message .= 'Content-Type: ' . $raw['Content-Type'] . self::NL;
+                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                    $message .= self::NL;
+                    $message .= base64_encode($raw['content']) . self::NL;
+                }
+            }
+            $message .= '--' . $separator . '--' . self::NL;
+        }
+        else
+        {
+            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+            $message .= self::NL . $this->_text['body'] . self::NL;
+        }
+        $message .= '.'; // The _dialog function below will add self::NL;
 
         // Body!
         $send = $this->_dialog($message, self::OK);
