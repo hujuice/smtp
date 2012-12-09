@@ -165,6 +165,13 @@ class smtp
     protected $_priority;
 
     /**
+     * Custom headers
+     *
+     * @var array
+     */
+    protected $_headers = array();
+
+    /**
      * Subject
      *
      * @var string
@@ -426,6 +433,19 @@ class smtp
     }
 
     /**
+     * Custom header
+     *
+     * @param string $header
+     * @return array
+     */
+    public function header($name = null, $value = null)
+    {
+        if ($name)
+            $this->_headers[(string) $name] = (string) $value;
+        return $this->_headers;
+    }
+
+    /**
      * Subject
      *
      * @param string $subject
@@ -619,15 +639,19 @@ class smtp
         if ($this->_priority)
             $message .= 'X-Priority: ' . $this->_priority . self::NL;
 
+        // Mailer
+        $message .= 'X-mailer: ' . self::MAILER . self::NL;
+        $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
+
+        // Custom headers
+        foreach ($this->_headers as $name => $value)
+            $message .= $name . ': ' . $value. self::NL;
+
         // Date
         $message .= 'Date: ' . date('r') . self::NL;
 
         // Subject
         $message .= 'Subject: ' . $this->_subject . self::NL;
-
-        // Mailer
-        $message .= 'X-mailer: ' . self::MAILER . self::NL;
-        $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
 
         // Message
         /*

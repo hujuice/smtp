@@ -18,6 +18,7 @@ Advanced usage
     $smtp->mailFrom('my_account@domain');
     $smtp->replyTo('anotheraddress@anotherdomain');
     $smtp->priority(4);
+    $smtp->header('MyCustomHeader', 'The value of my custom header');
     $smtp->to('addr1@domain', 'My friend');
     $smtp->to('addr2@anotherdomain', 'Another friend');
     $smtp->cc('addr3@domain', 'My mama');
@@ -46,6 +47,7 @@ FEATURES
 - separate 'MAIL FROM' management
 - Reply-To management
 - priority management
+- custom headers
 - Content-Type equipped text (e.g. text/html)
 - attachments from file
 - attachments from string
