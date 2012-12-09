@@ -25,7 +25,7 @@
  */
 
 /**
- * Simple SMTP client
+ * Rich SMTP client
  *
  * @package     SMTP
  * @link        http://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol Documentation
