@@ -322,7 +322,7 @@ class smtp
     public function auth($user, $pass)
     {
         $this->_user = base64_encode($user);
-        $this->_pass = base64_encode($password);
+        $this->_pass = base64_encode($pass);
     }
 
     /**
