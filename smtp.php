@@ -692,7 +692,7 @@ class smtp
             {
                 $message .= '--' . $separator . self::NL;
                 $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
-                if (substr($attach['Content-Type'], 0, 5) == 'text/')
+                if (substr($raw['Content-Type'], 0, 5) == 'text/')
                 {
                     $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
                     $message .= self::NL;
