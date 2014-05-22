@@ -334,7 +334,7 @@ class smtp
      */
     public function from($from = null, $name = '')
     {
-        if ($from)
+        if (null !== $from)
         {
             $this->_from['address'] = (string) $from;
             $this->_from['name'] = (string) $name;
@@ -350,7 +350,7 @@ class smtp
      */
     public function mailFrom($mail_from = null)
     {
-        if ($mail_from)
+        if (null !== $mail_from)
             $this->_mailFrom = (string) $mail_from;
 
         return $this->_mailFrom;
@@ -366,7 +366,7 @@ class smtp
     public function replyTo($reply_to = null, $name = null)
     {
 
-        if ($reply_to)
+        if (null !== $reply_to)
         {
             $this->_replyTo['address'] = (string) $reply_to;
             $this->_replyTo['name'] = (string) $name;

@@ -37,6 +37,16 @@ Advanced usage
     ob_end_clean();
     $smtp->raw($stringdata, 'Flyer.jpg', 'image/jpeg');
     $smtp->send();
+
+    $smtp->clear();
+    $smtp->from('anewsender@anewdomain');
+    $smtp->mailFrom('setanewmailfrom@anewdomain');
+    $smtp->replyTo('');
+    $smtp->to('anewdest@anothernewdomain');
+    $smtp->subject('newsubject');
+    $smtp->text('newmessage');
+    $smtp->send();
+
     echo $smtp->dump(); // Dump the full logging
 
 FEATURES
