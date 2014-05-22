@@ -36,9 +36,10 @@ Advanced usage
     $stringdata = ob_get_contents(); // read from buffer
     ob_end_clean();
     $smtp->raw($stringdata, 'Flyer.jpg', 'image/jpeg');
+    $smtp->charset('UTF-8'); // For subject, names, etc.
     $smtp->send();
 
-    $smtp->clear();
+    $smtp->clear(); // Clear recipients and attachments
     $smtp->from('anewsender@anewdomain');
     $smtp->mailFrom('setanewmailfrom@anewdomain');
     $smtp->replyTo('');

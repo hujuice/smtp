@@ -118,6 +118,13 @@ class smtp
     protected $_pass;
 
     /**
+     * Charset (excluding text and attachments)
+     *
+     * @var string
+     */
+    protected $_charset = 'UTF-8';
+
+    /**
      * From
      *
      * @var array
@@ -197,7 +204,7 @@ class smtp
     protected $_text = array(
         'body'          => '',
         'Content-Type'  => 'text/plain',
-        'charset'       => 'utf-8'
+        'charset'       => 'UTF-8'
     );
 
     /**
@@ -220,6 +227,21 @@ class smtp
      * @var string
      */
     protected $_log = '';
+
+    /**
+     * Charset encoding
+     *
+     * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
+     * @param string $string
+     */
+    protected function _encode($string)
+    {
+        if ($this->_charset) {
+            return '=?' . $this->_charset . '?B?' . base64_encode($string) . '?=';
+        } else {
+            return $string;
+        }
+    }
 
     /**
      * Add or replace recipients
@@ -344,7 +366,7 @@ class smtp
     {
         // Quit
         $this->_dialog('QUIT', self::BYE);
-        
+
         if ($this->_smtp)
             fclose($this->_smtp);
     }
@@ -362,6 +384,19 @@ class smtp
     {
         $this->_user = base64_encode($user);
         $this->_pass = base64_encode($pass);
+    }
+
+    /**
+     * Charset (excluding text and attachments)
+     * Note that this is the charset for Subject, names, etc.
+     * In a web context, should match the 'Content-Type'.
+     * If empty will be pure ASCII (7-bit)
+     *
+     * @param string
+     */
+    public function charset($charset)
+    {
+        $this->_charset = (string) $charset;
     }
 
     /**
@@ -593,6 +628,7 @@ class smtp
     /**
      * Send
      *
+     * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
      * @return string
      * @throw Exception
      */
@@ -639,7 +675,7 @@ class smtp
         if (empty($this->_from['name']))
             $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
         else
-            $message .= 'From: "' . $this->_from['name'] . '"<' . $this->_from['address'] . '>' . self::NL;
+            $message .= 'From: "' . $this->_encode($this->_from['name']) . '"<' . $this->_from['address'] . '>' . self::NL;
 
         // Reply to
         if (!empty($this->_replyTo))
@@ -647,7 +683,7 @@ class smtp
             if (empty($this->_replyTo['name']))
                 $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
             else
-                $message .= 'Reply-To: "' . $this->_replyTo['name'] . '"<' . $this->_replyTo['address'] . '>' . self::NL;
+                $message .= 'Reply-To: "' . $this->_encode($this->_replyTo['name']) . '"<' . $this->_replyTo['address'] . '>' . self::NL;
         }
 
         // To
@@ -656,7 +692,7 @@ class smtp
             if (is_integer($name))
                 $message .= 'To: <' . $rcpt . '>' . self::NL;
             else
-                $message .= 'To: "' . $name . '"<' . $rcpt . '>' . self::NL;
+                $message .= 'To: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
         }
 
         // Cc
@@ -665,7 +701,7 @@ class smtp
             if (is_integer($name))
                 $message .= 'Cc: <' . $rcpt . '>' . self::NL;
             else
-                $message .= 'Cc: "' . $name . '"<' . $rcpt . '>' . self::NL;
+                $message .= 'Cc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
         }
 
         // Bcc
@@ -674,7 +710,7 @@ class smtp
             if (is_integer($name))
                 $message .= 'Bcc: <' . $rcpt . '>' . self::NL;
             else
-                $message .= 'Bcc: "' . $name . '"<' . $rcpt . '>' . self::NL;
+                $message .= 'Bcc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
         }
 
         // Priority
@@ -693,7 +729,7 @@ class smtp
         $message .= 'Date: ' . date('r') . self::NL;
 
         // Subject
-        $message .= 'Subject: ' . $this->_subject . self::NL;
+        $message .= 'Subject: ' . $this->_encode($this->_subject) . self::NL;
 
         // Message
         /*
