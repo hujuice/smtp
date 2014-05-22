@@ -90,7 +90,18 @@ class smtp
      *
      * @var resource
      */
-    protected $_smtp;
+    protected $_smtp = null;
+
+    /**
+     * Server
+     *
+     * @var array
+     */
+    protected $_server = array(
+        'host'      => null,
+        'port'      => 25,
+        'timeout'   => 3,
+    );
 
     /**
      * Auth user (base64 encoded)
@@ -184,10 +195,10 @@ class smtp
      * @var string
      */
     protected $_text = array(
-                            'body'          => '',
-                            'Content-Type'  => 'text/plain',
-                            'charset'       => 'utf-8'
-                            );
+        'body'          => '',
+        'Content-Type'  => 'text/plain',
+        'charset'       => 'utf-8'
+    );
 
     /**
      * File attachments
@@ -216,7 +227,6 @@ class smtp
      * @param string $dest
      * @param string $destName
      * @param array $class
-     * @return void
      * @throw Exception
      */
     protected function _recipients($dest, $destName, $class)
@@ -268,12 +278,50 @@ class smtp
 
     /**
      * Connection to the SMTP server
+     * @throw Exception
+     */
+    public function _connect()
+    {
+        // Connect (if not already connected)
+        if (empty($this->_smtp))
+        {
+            if ($this->_smtp = fsockopen($this->_server['host'], $this->_server['port'], $errno, $errstr, $this->_server['timeout']))
+            {
+                if (substr($response = fgets($this->_smtp), 0, 3) != self::READY)
+                    throw new Exception('Server NOT ready! The server responded with this message:' . PHP_EOL . $response);
+
+                $this->_log = $response . PHP_EOL;
+
+                // HELO
+                $sender = explode('@', $this->_from['address']);
+                $this->_dialog('HELO ' . $sender[1], self::OK);
+
+                // Auth
+                if ($this->_user && $this->_pass)
+                {
+                    // See http://www.fehcom.de/qmail/smtpauth.html
+                    $this->_dialog('auth login', self::TEXT64);
+                    $this->_dialog($this->_user, self::TEXT64);
+                    $this->_dialog($this->_pass, self::AUTHOK);
+                }
+            }
+            else
+            {
+                $message = 'Unable to connect to ' . $this->_server['host'] . ' on port ' . $this->_server['port'] . ' within ' . $this->_server['timeout'] . ' seconds' . PHP_EOL;
+                if (!empty($errstr))
+                    $message .= 'The remote server responded:' . PHP_EOL . $errstr . '(' . $errno . ')';
+                throw new Exception($message);
+            }
+        }
+    }
+
+    /**
+     * Connection to the SMTP server
      *
      * @param string $host
      * @param integer $port
      * @param integer $timeout
-     * @return void
-     * @throw exception
+     * @throw Exception
      */
     public function __construct($host, $port = 25 , $timeout = 3)
     {
@@ -281,30 +329,22 @@ class smtp
         if (empty($host))
             throw new Exception('Undefined SMTP server');
 
-        // Connect
-        if ($this->_smtp = fsockopen($host, $port, $errno, $errstr, $timeout))
-        {
-            if (substr($response = fgets($this->_smtp), 0, 3) != self::READY)
-                throw new Exception('Server NOT ready! The server responded with this message:' . PHP_EOL . $response);
-
-            $this->_log = $response . PHP_EOL;
-        }
-        else
-        {
-            $message = 'Unable to connect to ' . $host . ' on port ' . $port . ' within ' . $timeout . ' seconds' . PHP_EOL;
-            if (!empty($errstr))
-                $message .= 'The remote server responded:' . PHP_EOL . $errstr . '(' . $errno . ')';
-            throw new Exception($message);
-        }
+        // Settings
+        $this->_server['host'] = (string) $host;
+        if ($port)
+            $this->_server['port'] = (integer) $port;
+        if ($timeout)
+            $this->_server['timeout'] = (integer) $timeout;
     }
 
     /**
      * Closes connection
-     *
-     * @return void
      */
     public function __destruct()
     {
+        // Quit
+        $this->_dialog('QUIT', self::BYE);
+        
         if ($this->_smtp)
             fclose($this->_smtp);
     }
@@ -317,7 +357,6 @@ class smtp
      *
      * @param string $user
      * @param string $pass
-     * @return void
      */
     public function auth($user, $pass)
     {
@@ -572,18 +611,8 @@ class smtp
         if (empty($this->_text))
             throw new Exception('No message text');
 
-        // HELO
-        $sender = explode('@', $this->_from['address']);
-        $this->_dialog('HELO ' . $sender[1], self::OK);
-
-        // Auth
-        if ($this->_user && $this->_pass)
-        {
-            // See http://www.fehcom.de/qmail/smtpauth.html
-            $this->_dialog('auth login', self::TEXT64);
-            $this->_dialog($this->_user, self::TEXT64);
-            $this->_dialog($this->_pass, self::AUTHOK);
-        }
+        // Connection
+        $this->_connect();
 
         // From
         if ($this->_mailFrom)
@@ -731,8 +760,6 @@ class smtp
         // Body!
         $send = $this->_dialog($message, self::OK);
 
-        // Quit
-        $this->_dialog('QUIT', self::BYE);
         return substr($send, 4);
     }
 
