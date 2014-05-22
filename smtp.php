@@ -539,6 +539,19 @@ class smtp
     }
 
     /**
+     * Completely clear recipients, attachments and headers (for a new message)
+     */
+    public function clear()
+    {
+        $this->_to = array();
+        $this->_cc = array();
+        $this->_bcc = array();
+        $this->_headers = array();
+        $this->_attachments = array();
+        $this->_raw = array();
+    }
+
+    /**
      * Send
      *
      * @return string
