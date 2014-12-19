@@ -24,13 +24,16 @@
  * @version     1.1
  */
 
+namespace Hujuice\Smtp;
+use Exception;
+
 /**
  * Rich SMTP client
  *
  * @package     SMTP
  * @link        http://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol Documentation
  */
-class smtp
+class Smtp
 {
     /**
      * New line character
