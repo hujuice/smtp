@@ -21,7 +21,7 @@
  * @author      Sergio Vaccaro <sergiovaccaro67@gmail.com>
  * @copyright   Copyright (c) Sergio Vaccaro
  * @license     http://www.gnu.org/licenses/gpl-3.0.txt     GPLv3
- * @version     1.1
+ * @version     1.3
  */
 
 namespace Hujuice\Smtp;
