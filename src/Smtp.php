@@ -210,6 +210,8 @@ class Smtp
         'charset'       => 'UTF-8'
     );
 
+    protected $_body = null;
+
     /**
      * File attachments
      *
@@ -546,12 +548,17 @@ class Smtp
         if (null !== $text)
         {
             $this->_text = array(
-                                'body'          => str_replace("\n", self::NL, (string) $text),
-                                'Content-Type'  => $content_type,
-                                'charset'       => $charset
-                                );
+                'body'          => str_replace("\n", self::NL, (string) $text),
+                'Content-Type'  => $content_type,
+                'charset'       => $charset
+            );
         }
         return $this->_text;
+    }
+
+    public function body($body)
+    {
+        $this->_body = $body;
     }
 
     /**
@@ -570,10 +577,10 @@ class Smtp
         if (is_readable($path))
         {
             $attachment = array(
-                                'path'          => (string) $path,
-                                'Content-Type'  => (string) $content_type,
-                                'charset'       => (string) $charset
-                                );
+                'path'          => (string) $path,
+                'Content-Type'  => (string) $content_type,
+                'charset'       => (string) $charset
+            );
 
             $name || ($name = pathinfo($path, PATHINFO_BASENAME));
 
@@ -602,10 +609,10 @@ class Smtp
         if ($content)
         {
             $attachment = array(
-                                    'content'       => (string) $content,
-                                    'Content-Type'  => (string) $content_type,
-                                    'charset'       => (string) $charset
-                                    );
+                'content'       => (string) $content,
+                'Content-Type'  => (string) $content_type,
+                'charset'       => (string) $charset
+            );
 
             if (empty($name))
                 $name = time() . '-' . mt_rand();
@@ -644,11 +651,13 @@ class Smtp
         if (empty($this->_to) && empty($this->_cc) && empty($this->_bcc))
             throw new Exception('No recipients');
 
-        if (empty($this->_subject)) // Net Ecology
-            throw new Exception('No subject');
+        if (empty($this->_body)) {
+            if (empty($this->_subject)) // Net Ecology
+                throw new Exception('No subject');
 
-        if (empty($this->_text))
-            throw new Exception('No message text');
+            if (empty($this->_text))
+                throw new Exception('No message text');
+        }
 
         // Connection
         $this->_connect();
@@ -671,128 +680,132 @@ class Smtp
         // Data
         $this->_dialog('DATA', self::DATAOK);
 
-        // Message
-        $message = '';
+        if ($this->_body) {
+            $message = $this->_body . self::NL;
+        } else {
+            // Message
+            $message = '';
 
-        // From
-        if (empty($this->_from['name']))
-            $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
-        else
-            $message .= 'From: "' . $this->_encode($this->_from['name']) . '"<' . $this->_from['address'] . '>' . self::NL;
-
-        // Reply to
-        if (!empty($this->_replyTo))
-        {
-            if (empty($this->_replyTo['name']))
-                $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
+            // From
+            if (empty($this->_from['name']))
+                $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
             else
-                $message .= 'Reply-To: "' . $this->_encode($this->_replyTo['name']) . '"<' . $this->_replyTo['address'] . '>' . self::NL;
-        }
+                $message .= 'From: "' . $this->_encode($this->_from['name']) . '"<' . $this->_from['address'] . '>' . self::NL;
 
-        // To
-        foreach ($this->_to as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'To: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'To: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Cc
-        foreach ($this->_cc as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'Cc: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'Cc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Bcc
-        foreach ($this->_bcc as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'Bcc: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'Bcc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Priority
-        if ($this->_priority)
-            $message .= 'X-Priority: ' . $this->_priority . self::NL;
-
-        // Mailer
-        $message .= 'X-mailer: ' . self::MAILER . self::NL;
-        $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
-
-        // Custom headers
-        foreach ($this->_headers as $name => $value)
-            $message .= $name . ': ' . $value. self::NL;
-
-        // Date
-        $message .= 'Date: ' . date('r') . self::NL;
-
-        // Subject
-        $message .= 'Subject: ' . $this->_encode($this->_subject) . self::NL;
-
-        // Message
-        /*
-        The message will containt text and attachments.
-        This implementation consider the multipart/mixed method only.
-        http://en.wikipedia.org/wiki/MIME#Multipart_messages
-        */
-        if ($this->_attachments || $this->_raw)
-        {
-            $separator = hash('sha256', time());
-            $message .= 'MIME-Version: 1.0' . self::NL;
-            $message .= 'Content-Type: multipart/mixed; boundary=' . $separator . self::NL;
-            $message .= self::NL;
-            $message .= 'This is a message with multiple parts in MIME format.' . self::NL;
-            $message .= '--' . $separator . self::NL;
-            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
-            $message .= self::NL;
-            $message .= $this->_text['body'] . self::NL;
-            foreach ($this->_attachments as $name => $attach)
+            // Reply to
+            if (!empty($this->_replyTo))
             {
-                $message .= '--' . $separator . self::NL;
-                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r', filemtime($attach['path'])) . '"' . self::NL;
-                if (substr($attach['Content-Type'], 0, 5) == 'text/')
-                {
-                    $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
-                    $message .= self::NL;
-                    $message .= file_get_contents($attach['path']) . self::NL;
-                }
+                if (empty($this->_replyTo['name']))
+                    $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
                 else
-                {
-                    $message .= 'Content-Type: ' . $attach['Content-Type'] . self::NL;
-                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
-                    $message .= self::NL;
-                    $message .= base64_encode(file_get_contents($attach['path'])) . self::NL;
-                }
+                    $message .= 'Reply-To: "' . $this->_encode($this->_replyTo['name']) . '"<' . $this->_replyTo['address'] . '>' . self::NL;
             }
-            foreach ($this->_raw as $name => $raw)
+
+            // To
+            foreach ($this->_to as $name => $rcpt)
             {
-                $message .= '--' . $separator . self::NL;
-                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
-                if (substr($raw['Content-Type'], 0, 5) == 'text/')
-                {
-                    $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
-                    $message .= self::NL;
-                    $message .= $raw['content'] . self::NL;
-                }
+                if (is_integer($name))
+                    $message .= 'To: <' . $rcpt . '>' . self::NL;
                 else
-                {
-                    $message .= 'Content-Type: ' . $raw['Content-Type'] . self::NL;
-                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
-                    $message .= self::NL;
-                    $message .= base64_encode($raw['content']) . self::NL;
-                }
+                    $message .= 'To: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
             }
-            $message .= '--' . $separator . '--' . self::NL;
-        }
-        else
-        {
-            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
-            $message .= self::NL . $this->_text['body'] . self::NL;
+
+            // Cc
+            foreach ($this->_cc as $name => $rcpt)
+            {
+                if (is_integer($name))
+                    $message .= 'Cc: <' . $rcpt . '>' . self::NL;
+                else
+                    $message .= 'Cc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
+            }
+
+            // Bcc
+            foreach ($this->_bcc as $name => $rcpt)
+            {
+                if (is_integer($name))
+                    $message .= 'Bcc: <' . $rcpt . '>' . self::NL;
+                else
+                    $message .= 'Bcc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
+            }
+
+            // Priority
+            if ($this->_priority)
+                $message .= 'X-Priority: ' . $this->_priority . self::NL;
+
+            // Mailer
+            $message .= 'X-mailer: ' . self::MAILER . self::NL;
+            $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
+
+            // Custom headers
+            foreach ($this->_headers as $name => $value)
+                $message .= $name . ': ' . $value. self::NL;
+
+            // Date
+            $message .= 'Date: ' . date('r') . self::NL;
+
+            // Subject
+            $message .= 'Subject: ' . $this->_encode($this->_subject) . self::NL;
+
+            // Message
+            /*
+            The message will containt text and attachments.
+            This implementation consider the multipart/mixed method only.
+            http://en.wikipedia.org/wiki/MIME#Multipart_messages
+            */
+            if ($this->_attachments || $this->_raw)
+            {
+                $separator = hash('sha256', time());
+                $message .= 'MIME-Version: 1.0' . self::NL;
+                $message .= 'Content-Type: multipart/mixed; boundary=' . $separator . self::NL;
+                $message .= self::NL;
+                $message .= 'This is a message with multiple parts in MIME format.' . self::NL;
+                $message .= '--' . $separator . self::NL;
+                $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+                $message .= self::NL;
+                $message .= $this->_text['body'] . self::NL;
+                foreach ($this->_attachments as $name => $attach)
+                {
+                    $message .= '--' . $separator . self::NL;
+                    $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r', filemtime($attach['path'])) . '"' . self::NL;
+                    if (substr($attach['Content-Type'], 0, 5) == 'text/')
+                    {
+                        $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
+                        $message .= self::NL;
+                        $message .= file_get_contents($attach['path']) . self::NL;
+                    }
+                    else
+                    {
+                        $message .= 'Content-Type: ' . $attach['Content-Type'] . self::NL;
+                        $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                        $message .= self::NL;
+                        $message .= base64_encode(file_get_contents($attach['path'])) . self::NL;
+                    }
+                }
+                foreach ($this->_raw as $name => $raw)
+                {
+                    $message .= '--' . $separator . self::NL;
+                    $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
+                    if (substr($raw['Content-Type'], 0, 5) == 'text/')
+                    {
+                        $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
+                        $message .= self::NL;
+                        $message .= $raw['content'] . self::NL;
+                    }
+                    else
+                    {
+                        $message .= 'Content-Type: ' . $raw['Content-Type'] . self::NL;
+                        $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                        $message .= self::NL;
+                        $message .= base64_encode($raw['content']) . self::NL;
+                    }
+                }
+                $message .= '--' . $separator . '--' . self::NL;
+            }
+            else
+            {
+                $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+                $message .= self::NL . $this->_text['body'] . self::NL;
+            }
         }
         $message .= '.'; // The _dialog function below will add self::NL;
 
