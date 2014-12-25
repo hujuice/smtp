@@ -233,11 +233,16 @@ class Smtp
      */
     protected $_log = '';
 
+    protected $_pipelining = true;
+
+    protected $_pipelinedCommands = array();
+
     /**
      * Charset encoding
      *
      * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
      * @param string $string
+     * @return string
      */
     protected function _encode($string)
     {
@@ -254,7 +259,7 @@ class Smtp
      * @param string $dest
      * @param string $destName
      * @param array $class
-     * @throw Exception
+     * @throws Exception
      */
     protected function _recipients($dest, $destName, $class)
     {
@@ -280,32 +285,57 @@ class Smtp
             throw new Exception('Wrong recipient');
     }
 
+    protected function _readResponse($expected)
+    {
+        $response = '';
+        while (($line = fgets($this->_smtp)) !== false) {
+            $response .= $line;
+            if ($line[3] != '-') {
+                break;
+            }
+        }
+        $this->_log .= $response;
+
+        if (substr($response, 0, 3) != $expected) {
+            throw new Exception("Unexpected response. Expected {$expected}. Here is the dialog dump:\n{$this->_log}");
+        }
+
+        return $response;
+    }
+
     /**
      * Perform a request/response exchange
      *
      * @param string $request
      * @param string $expect The expected status code
      * @return string
-     * @throw Exception
+     * @throws Exception
      */
     protected function _dialog($request, $expect)
     {
         $this->_log .= $request . PHP_EOL;
 
-        fwrite ($this->_smtp, $request . self::NL);
-        $response = fgets($this->_smtp);
+        fwrite($this->_smtp, $request . self::NL);
 
-        $this->_log .= $response . PHP_EOL;
+        if ($this->_pipelining) {
+            // is pipelinable command?
+            if (in_array(substr($request, 0, 4), array('RSET', 'MAIL', 'SEND', 'SOML', 'SAML', 'RCPT'))) {
+                $this->_pipelinedCommands[] = $expect;
+                return null;
+            } else {
+                while ($this->_pipelinedCommands) {
+                    $_expected = array_shift($this->_pipelinedCommands);
+                    $this->_readResponse($_expected);
+                }
+            }
+        }
 
-        if (substr($response, 0, 3) != $expect)
-            throw new Exception('Message "' . $request . '" NOT accepted! Here is the dialog dump:' . PHP_EOL . $this->_log);
-
-        return $response;
+        return $this->_readResponse($expect);
     }
 
     /**
      * Connection to the SMTP server
-     * @throw Exception
+     * @throws Exception
      */
     public function _connect()
     {
@@ -321,7 +351,8 @@ class Smtp
 
                 // HELO
                 $sender = explode('@', $this->_from['address']);
-                $this->_dialog('HELO ' . $sender[1], self::OK);
+                $ehlo = $this->_dialog('EHLO ' . $sender[1], self::OK);
+                $this->_pipelining = preg_match('~250[\s-]pipelining~i', $ehlo);
 
                 // Auth
                 if ($this->_user && $this->_pass)
@@ -348,7 +379,7 @@ class Smtp
      * @param string $host
      * @param integer $port
      * @param integer $timeout
-     * @throw Exception
+     * @throws Exception
      */
     public function __construct($host, $port = 25 , $timeout = 3)
     {
@@ -496,6 +527,7 @@ class Smtp
      * Priority
      *
      * @param integer $priority
+     * @throws Exception
      * @return integer
      */
     public function priority($priority = null)
@@ -514,7 +546,8 @@ class Smtp
     /**
      * Custom header
      *
-     * @param string $header
+     * @param string $name
+     * @param string $value
      * @return array
      */
     public function header($name = null, $value = null)
@@ -541,6 +574,8 @@ class Smtp
      * Text
      *
      * @param string $text
+     * @param string $content_type
+     * @param string $charset
      * @return string
      */
     public function text($text = null, $content_type = 'text/plain', $charset = 'utf-8')
@@ -568,8 +603,10 @@ class Smtp
      * @link http://en.wikipedia.org/wiki/MIME#Multipart_messages
      * @link http://support.mozilla.org/it/questions/746116
      * @param string $path
+     * @param string $name
      * @param string $content_type
      * @param string $charset Will be used for text/* only
+     * @throws Exception
      * @return array
      */
     public function attachment($path = null, $name = '', $content_type = 'application/octet-stream', $charset = 'utf-8')
@@ -640,7 +677,7 @@ class Smtp
      *
      * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
      * @return string
-     * @throw Exception
+     * @throws Exception
      */
     public function send()
     {
@@ -748,7 +785,7 @@ class Smtp
 
             // Message
             /*
-            The message will containt text and attachments.
+            The message will contain text and attachments.
             This implementation consider the multipart/mixed method only.
             http://en.wikipedia.org/wiki/MIME#Multipart_messages
             */
