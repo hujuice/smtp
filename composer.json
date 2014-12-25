@@ -1,6 +1,6 @@
 {
     "name": "hujuice/smtp",
-    "version": "1.4",
+    "version": "1.5",
     "autoload": {
         "psr-4": {
             "Hujuice\\Smtp\\": "src/"

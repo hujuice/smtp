@@ -670,6 +670,7 @@ class Smtp
         $this->_headers = array();
         $this->_attachments = array();
         $this->_raw = array();
+        $this->_body = null;
     }
 
     /**
