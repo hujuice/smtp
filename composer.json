@@ -1,0 +1,13 @@
+{
+    "name": "hujuice/smtp",
+    "version": "1.6",
+    "autoload": {
+        "psr-4": {
+            "Hujuice\\Smtp\\": "src/"
+        }
+    },
+    "require": {},
+    "require-dev": {
+        "phpunit/phpunit": "3.7.*"
+    }
+}

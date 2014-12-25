@@ -21,8 +21,11 @@
  * @author      Sergio Vaccaro <sergiovaccaro67@gmail.com>
  * @copyright   Copyright (c) Sergio Vaccaro
  * @license     http://www.gnu.org/licenses/gpl-3.0.txt     GPLv3
- * @version     1.1
+ * @version     1.3
  */
+
+namespace Hujuice\Smtp;
+use Exception;
 
 /**
  * Rich SMTP client
@@ -30,7 +33,7 @@
  * @package     SMTP
  * @link        http://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol Documentation
  */
-class smtp
+class Smtp
 {
     /**
      * New line character
@@ -207,6 +210,8 @@ class smtp
         'charset'       => 'UTF-8'
     );
 
+    protected $_body = null;
+
     /**
      * File attachments
      *
@@ -228,11 +233,16 @@ class smtp
      */
     protected $_log = '';
 
+    protected $_pipelining = true;
+
+    protected $_pipelinedCommands = array();
+
     /**
      * Charset encoding
      *
      * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
      * @param string $string
+     * @return string
      */
     protected function _encode($string)
     {
@@ -249,7 +259,7 @@ class smtp
      * @param string $dest
      * @param string $destName
      * @param array $class
-     * @throw Exception
+     * @throws Exception
      */
     protected function _recipients($dest, $destName, $class)
     {
@@ -275,32 +285,57 @@ class smtp
             throw new Exception('Wrong recipient');
     }
 
+    protected function _readResponse($expected)
+    {
+        $response = '';
+        while (($line = fgets($this->_smtp)) !== false) {
+            $response .= $line;
+            if ($line[3] != '-') {
+                break;
+            }
+        }
+        $this->_log .= $response;
+
+        if (substr($response, 0, 3) != $expected) {
+            throw new Exception("Unexpected response. Expected {$expected}. Here is the dialog dump:\n{$this->_log}");
+        }
+
+        return $response;
+    }
+
     /**
      * Perform a request/response exchange
      *
      * @param string $request
      * @param string $expect The expected status code
      * @return string
-     * @throw Exception
+     * @throws Exception
      */
     protected function _dialog($request, $expect)
     {
         $this->_log .= $request . PHP_EOL;
 
-        fwrite ($this->_smtp, $request . self::NL);
-        $response = fgets($this->_smtp);
+        fwrite($this->_smtp, $request . self::NL);
 
-        $this->_log .= $response . PHP_EOL;
+        if ($this->_pipelining) {
+            // is pipelinable command?
+            if (in_array(substr($request, 0, 4), array('RSET', 'MAIL', 'SEND', 'SOML', 'SAML', 'RCPT'))) {
+                $this->_pipelinedCommands[] = $expect;
+                return null;
+            } else {
+                while ($this->_pipelinedCommands) {
+                    $_expected = array_shift($this->_pipelinedCommands);
+                    $this->_readResponse($_expected);
+                }
+            }
+        }
 
-        if (substr($response, 0, 3) != $expect)
-            throw new Exception('Message "' . $request . '" NOT accepted! Here is the dialog dump:' . PHP_EOL . $this->_log);
-
-        return $response;
+        return $this->_readResponse($expect);
     }
 
     /**
      * Connection to the SMTP server
-     * @throw Exception
+     * @throws Exception
      */
     public function _connect()
     {
@@ -316,7 +351,8 @@ class smtp
 
                 // HELO
                 $sender = explode('@', $this->_from['address']);
-                $this->_dialog('HELO ' . $sender[1], self::OK);
+                $ehlo = $this->_dialog('EHLO ' . $sender[1], self::OK);
+                $this->_pipelining = preg_match('~250[\s-]pipelining~i', $ehlo);
 
                 // Auth
                 if ($this->_user && $this->_pass)
@@ -343,7 +379,7 @@ class smtp
      * @param string $host
      * @param integer $port
      * @param integer $timeout
-     * @throw Exception
+     * @throws Exception
      */
     public function __construct($host, $port = 25 , $timeout = 3)
     {
@@ -364,11 +400,12 @@ class smtp
      */
     public function __destruct()
     {
-        // Quit
-        $this->_dialog('QUIT', self::BYE);
 
-        if ($this->_smtp)
+        if ($this->_smtp) {
+            // Quit
+            $this->_dialog('QUIT', self::BYE);
             fclose($this->_smtp);
+        }
     }
 
     /**
@@ -491,6 +528,7 @@ class smtp
      * Priority
      *
      * @param integer $priority
+     * @throws Exception
      * @return integer
      */
     public function priority($priority = null)
@@ -509,7 +547,8 @@ class smtp
     /**
      * Custom header
      *
-     * @param string $header
+     * @param string $name
+     * @param string $value
      * @return array
      */
     public function header($name = null, $value = null)
@@ -536,6 +575,8 @@ class smtp
      * Text
      *
      * @param string $text
+     * @param string $content_type
+     * @param string $charset
      * @return string
      */
     public function text($text = null, $content_type = 'text/plain', $charset = 'utf-8')
@@ -543,12 +584,17 @@ class smtp
         if (null !== $text)
         {
             $this->_text = array(
-                                'body'          => str_replace("\n", self::NL, (string) $text),
-                                'Content-Type'  => $content_type,
-                                'charset'       => $charset
-                                );
+                'body'          => str_replace("\n", self::NL, (string) $text),
+                'Content-Type'  => $content_type,
+                'charset'       => $charset
+            );
         }
         return $this->_text;
+    }
+
+    public function body($body)
+    {
+        $this->_body = $body;
     }
 
     /**
@@ -558,8 +604,10 @@ class smtp
      * @link http://en.wikipedia.org/wiki/MIME#Multipart_messages
      * @link http://support.mozilla.org/it/questions/746116
      * @param string $path
+     * @param string $name
      * @param string $content_type
      * @param string $charset Will be used for text/* only
+     * @throws Exception
      * @return array
      */
     public function attachment($path = null, $name = '', $content_type = 'application/octet-stream', $charset = 'utf-8')
@@ -567,10 +615,10 @@ class smtp
         if (is_readable($path))
         {
             $attachment = array(
-                                'path'          => (string) $path,
-                                'Content-Type'  => (string) $content_type,
-                                'charset'       => (string) $charset
-                                );
+                'path'          => (string) $path,
+                'Content-Type'  => (string) $content_type,
+                'charset'       => (string) $charset
+            );
 
             $name || ($name = pathinfo($path, PATHINFO_BASENAME));
 
@@ -599,10 +647,10 @@ class smtp
         if ($content)
         {
             $attachment = array(
-                                    'content'       => (string) $content,
-                                    'Content-Type'  => (string) $content_type,
-                                    'charset'       => (string) $charset
-                                    );
+                'content'       => (string) $content,
+                'Content-Type'  => (string) $content_type,
+                'charset'       => (string) $charset
+            );
 
             if (empty($name))
                 $name = time() . '-' . mt_rand();
@@ -623,6 +671,7 @@ class smtp
         $this->_headers = array();
         $this->_attachments = array();
         $this->_raw = array();
+        $this->_body = null;
     }
 
     /**
@@ -630,7 +679,7 @@ class smtp
      *
      * @see http://www.pcvr.nl/tcpip/smtp_sim.htm
      * @return string
-     * @throw Exception
+     * @throws Exception
      */
     public function send()
     {
@@ -641,11 +690,13 @@ class smtp
         if (empty($this->_to) && empty($this->_cc) && empty($this->_bcc))
             throw new Exception('No recipients');
 
-        if (empty($this->_subject)) // Net Ecology
-            throw new Exception('No subject');
+        if (empty($this->_body)) {
+            if (empty($this->_subject)) // Net Ecology
+                throw new Exception('No subject');
 
-        if (empty($this->_text))
-            throw new Exception('No message text');
+            if (empty($this->_text))
+                throw new Exception('No message text');
+        }
 
         // Connection
         $this->_connect();
@@ -668,128 +719,132 @@ class smtp
         // Data
         $this->_dialog('DATA', self::DATAOK);
 
-        // Message
-        $message = '';
+        if ($this->_body) {
+            $message = $this->_body . self::NL;
+        } else {
+            // Message
+            $message = '';
 
-        // From
-        if (empty($this->_from['name']))
-            $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
-        else
-            $message .= 'From: "' . $this->_encode($this->_from['name']) . '"<' . $this->_from['address'] . '>' . self::NL;
-
-        // Reply to
-        if (!empty($this->_replyTo))
-        {
-            if (empty($this->_replyTo['name']))
-                $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
+            // From
+            if (empty($this->_from['name']))
+                $message .= 'From: <' . $this->_from['address'] . '>' . self::NL;
             else
-                $message .= 'Reply-To: "' . $this->_encode($this->_replyTo['name']) . '"<' . $this->_replyTo['address'] . '>' . self::NL;
-        }
+                $message .= 'From: "' . $this->_encode($this->_from['name']) . '"<' . $this->_from['address'] . '>' . self::NL;
 
-        // To
-        foreach ($this->_to as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'To: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'To: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Cc
-        foreach ($this->_cc as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'Cc: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'Cc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Bcc
-        foreach ($this->_bcc as $name => $rcpt)
-        {
-            if (is_integer($name))
-                $message .= 'Bcc: <' . $rcpt . '>' . self::NL;
-            else
-                $message .= 'Bcc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
-        }
-
-        // Priority
-        if ($this->_priority)
-            $message .= 'X-Priority: ' . $this->_priority . self::NL;
-
-        // Mailer
-        $message .= 'X-mailer: ' . self::MAILER . self::NL;
-        $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
-
-        // Custom headers
-        foreach ($this->_headers as $name => $value)
-            $message .= $name . ': ' . $value. self::NL;
-
-        // Date
-        $message .= 'Date: ' . date('r') . self::NL;
-
-        // Subject
-        $message .= 'Subject: ' . $this->_encode($this->_subject) . self::NL;
-
-        // Message
-        /*
-        The message will containt text and attachments.
-        This implementation consider the multipart/mixed method only.
-        http://en.wikipedia.org/wiki/MIME#Multipart_messages
-        */
-        if ($this->_attachments || $this->_raw)
-        {
-            $separator = hash('sha256', time());
-            $message .= 'MIME-Version: 1.0' . self::NL;
-            $message .= 'Content-Type: multipart/mixed; boundary=' . $separator . self::NL;
-            $message .= self::NL;
-            $message .= 'This is a message with multiple parts in MIME format.' . self::NL;
-            $message .= '--' . $separator . self::NL;
-            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
-            $message .= self::NL;
-            $message .= $this->_text['body'] . self::NL;
-            foreach ($this->_attachments as $name => $attach)
+            // Reply to
+            if (!empty($this->_replyTo))
             {
-                $message .= '--' . $separator . self::NL;
-                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r', filemtime($attach['path'])) . '"' . self::NL;
-                if (substr($attach['Content-Type'], 0, 5) == 'text/')
-                {
-                    $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
-                    $message .= self::NL;
-                    $message .= file_get_contents($attach['path']) . self::NL;
-                }
+                if (empty($this->_replyTo['name']))
+                    $message .= 'Reply-To: <' . $this->_replyTo['address'] . '>' . self::NL;
                 else
-                {
-                    $message .= 'Content-Type: ' . $attach['Content-Type'] . self::NL;
-                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
-                    $message .= self::NL;
-                    $message .= base64_encode(file_get_contents($attach['path'])) . self::NL;
-                }
+                    $message .= 'Reply-To: "' . $this->_encode($this->_replyTo['name']) . '"<' . $this->_replyTo['address'] . '>' . self::NL;
             }
-            foreach ($this->_raw as $name => $raw)
+
+            // To
+            foreach ($this->_to as $name => $rcpt)
             {
-                $message .= '--' . $separator . self::NL;
-                $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
-                if (substr($raw['Content-Type'], 0, 5) == 'text/')
-                {
-                    $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
-                    $message .= self::NL;
-                    $message .= $raw['content'] . self::NL;
-                }
+                if (is_integer($name))
+                    $message .= 'To: <' . $rcpt . '>' . self::NL;
                 else
-                {
-                    $message .= 'Content-Type: ' . $raw['Content-Type'] . self::NL;
-                    $message .= 'Content-Transfer-Encoding: base64' . self::NL;
-                    $message .= self::NL;
-                    $message .= base64_encode($raw['content']) . self::NL;
-                }
+                    $message .= 'To: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
             }
-            $message .= '--' . $separator . '--' . self::NL;
-        }
-        else
-        {
-            $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
-            $message .= self::NL . $this->_text['body'] . self::NL;
+
+            // Cc
+            foreach ($this->_cc as $name => $rcpt)
+            {
+                if (is_integer($name))
+                    $message .= 'Cc: <' . $rcpt . '>' . self::NL;
+                else
+                    $message .= 'Cc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
+            }
+
+            // Bcc
+            foreach ($this->_bcc as $name => $rcpt)
+            {
+                if (is_integer($name))
+                    $message .= 'Bcc: <' . $rcpt . '>' . self::NL;
+                else
+                    $message .= 'Bcc: "' . $this->_encode($name) . '"<' . $rcpt . '>' . self::NL;
+            }
+
+            // Priority
+            if ($this->_priority)
+                $message .= 'X-Priority: ' . $this->_priority . self::NL;
+
+            // Mailer
+            $message .= 'X-mailer: ' . self::MAILER . self::NL;
+            $message .= 'X-mailer-author: ' . self::MAILER_AUTHOR . self::NL;
+
+            // Custom headers
+            foreach ($this->_headers as $name => $value)
+                $message .= $name . ': ' . $value. self::NL;
+
+            // Date
+            $message .= 'Date: ' . date('r') . self::NL;
+
+            // Subject
+            $message .= 'Subject: ' . $this->_encode($this->_subject) . self::NL;
+
+            // Message
+            /*
+            The message will contain text and attachments.
+            This implementation consider the multipart/mixed method only.
+            http://en.wikipedia.org/wiki/MIME#Multipart_messages
+            */
+            if ($this->_attachments || $this->_raw)
+            {
+                $separator = hash('sha256', time());
+                $message .= 'MIME-Version: 1.0' . self::NL;
+                $message .= 'Content-Type: multipart/mixed; boundary=' . $separator . self::NL;
+                $message .= self::NL;
+                $message .= 'This is a message with multiple parts in MIME format.' . self::NL;
+                $message .= '--' . $separator . self::NL;
+                $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+                $message .= self::NL;
+                $message .= $this->_text['body'] . self::NL;
+                foreach ($this->_attachments as $name => $attach)
+                {
+                    $message .= '--' . $separator . self::NL;
+                    $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r', filemtime($attach['path'])) . '"' . self::NL;
+                    if (substr($attach['Content-Type'], 0, 5) == 'text/')
+                    {
+                        $message .= 'Content-Type: ' . $attach['Content-Type'] . '; charset=' . $attach['charset'] . self::NL;
+                        $message .= self::NL;
+                        $message .= file_get_contents($attach['path']) . self::NL;
+                    }
+                    else
+                    {
+                        $message .= 'Content-Type: ' . $attach['Content-Type'] . self::NL;
+                        $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                        $message .= self::NL;
+                        $message .= base64_encode(file_get_contents($attach['path'])) . self::NL;
+                    }
+                }
+                foreach ($this->_raw as $name => $raw)
+                {
+                    $message .= '--' . $separator . self::NL;
+                    $message .= 'Content-Disposition: attachment; filename=' . $name . '; modification-date="' . date('r') . '"' . self::NL;
+                    if (substr($raw['Content-Type'], 0, 5) == 'text/')
+                    {
+                        $message .= 'Content-Type: ' . $raw['Content-Type'] . '; charset=' . $raw['charset'] . self::NL;
+                        $message .= self::NL;
+                        $message .= $raw['content'] . self::NL;
+                    }
+                    else
+                    {
+                        $message .= 'Content-Type: ' . $raw['Content-Type'] . self::NL;
+                        $message .= 'Content-Transfer-Encoding: base64' . self::NL;
+                        $message .= self::NL;
+                        $message .= base64_encode($raw['content']) . self::NL;
+                    }
+                }
+                $message .= '--' . $separator . '--' . self::NL;
+            }
+            else
+            {
+                $message .= 'Content-Type: ' . $this->_text['Content-Type'] . '; charset=' . $this->_text['charset'] . self::NL;
+                $message .= self::NL . $this->_text['body'] . self::NL;
+            }
         }
         $message .= '.'; // The _dialog function below will add self::NL;
 
