@@ -400,11 +400,12 @@ class Smtp
      */
     public function __destruct()
     {
-        // Quit
-        $this->_dialog('QUIT', self::BYE);
 
-        if ($this->_smtp)
+        if ($this->_smtp) {
+            // Quit
+            $this->_dialog('QUIT', self::BYE);
             fclose($this->_smtp);
+        }
     }
 
     /**

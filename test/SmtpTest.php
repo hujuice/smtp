@@ -3,10 +3,6 @@ use Hujuice\Smtp\Smtp;
 
 class SmtpTestClass extends PHPUnit_Framework_TestCase
 {
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unexpected response
-     */
     public function testSmtpClassLoading()
     {
         $smtp = new Smtp('localhost');
@@ -22,6 +18,5 @@ class SmtpTestClass extends PHPUnit_Framework_TestCase
         $smtp->text('Test');
         $res = $smtp->send();
         $this->assertStringStartsWith('Message queued for delivery', $res);
-        echo $smtp->dump();
     }
 }
